@@ -60,6 +60,7 @@ class RustSkinTelegramBot:
                 max_purchases INTEGER DEFAULT 10,
                 auto_purchase BOOLEAN DEFAULT TRUE,
                 max_price_cents INTEGER DEFAULT 1000,
+                max_item_age_days INTEGER DEFAULT 3,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -129,6 +130,7 @@ class RustSkinTelegramBot:
                     'max_purchases': row[5],
                     'auto_purchase': row[6] if len(row) > 6 else True,
                     'max_price_cents': row[7] if len(row) > 7 else 1000,
+                    'max_item_age_days': row[8] if len(row) > 8 else 3,
                     'processed_skins': set()
                 }
                 
@@ -146,6 +148,7 @@ class RustSkinTelegramBot:
                     'max_purchases': 10,
                     'auto_purchase': True,
                     'max_price_cents': 1000,  # $10.00 default max price
+                    'max_item_age_days': 3,  # Only buy items from last 3 days
                     'processed_skins': set()
                 }
                 
@@ -754,8 +757,16 @@ Need more help? Check the GitHub repository or contact support!"""
             is_accepted = item_data.get('isAccepted', False)
             workshop_file_id = item_data.get('workshopFileId')
             
+            # Time filters - only process recent items
+            time_accepted = item_data.get('timeAccepted')
+            time_created = item_data.get('timeCreated')
+            
             # Only process accepted items
             if not is_accepted:
+                return
+            
+            # Check if item is recent (within user's age limit)
+            if not self.is_recent_item(time_accepted, time_created, session['max_item_age_days']):
                 return
             
             if not creator_id:
@@ -763,7 +774,7 @@ Need more help? Check the GitHub repository or contact support!"""
             
             # Check if this is a first-time creator
             if await self.is_first_time_creator(creator_id, creator_name):
-                logger.info(f"User {user_id}: Found first-time creator {creator_name} with item {item_name}")
+                logger.info(f"User {user_id}: Found first-time creator {creator_name} with RECENT item {item_name}")
                 await self.record_opportunity_for_user(
                     user_id, item_data, creator_id, creator_name, item_name, 
                     item_type, item_collection, workshop_file_id
@@ -771,6 +782,46 @@ Need more help? Check the GitHub repository or contact support!"""
                 
         except Exception as e:
             logger.error(f"Error processing item for user {user_id}: {e}")
+    
+    def is_recent_item(self, time_accepted: str, time_created: str, max_age_days: int = 3) -> bool:
+        """Check if item was accepted/created within the specified number of days"""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Use timeAccepted if available, otherwise timeCreated
+            time_str = time_accepted or time_created
+            
+            if not time_str:
+                logger.warning("No timestamp found for item - skipping")
+                return False
+            
+            # Parse the timestamp (assuming ISO format)
+            if time_str.endswith('Z'):
+                item_time = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+            else:
+                item_time = datetime.fromisoformat(time_str)
+            
+            # Remove timezone info for comparison
+            item_time = item_time.replace(tzinfo=None)
+            current_time = datetime.utcnow()
+            
+            # Check if item is within the specified age limit
+            age_limit = timedelta(days=max_age_days)
+            item_age = current_time - item_time
+            
+            is_recent = item_age <= age_limit
+            
+            if not is_recent:
+                logger.debug(f"Item too old: {item_age.days} days old (limit: {max_age_days} days)")
+            else:
+                logger.debug(f"Item is recent: {item_age.days} days old (within {max_age_days} day limit)")
+            
+            return is_recent
+            
+        except Exception as e:
+            logger.error(f"Error checking item age: {e}")
+            # If we can't determine age, assume it's old to be safe
+            return False
     
     async def record_opportunity_for_user(self, user_id: int, item_data: Dict, creator_id: int, 
                                         creator_name: str, item_name: str, item_type: str, 
