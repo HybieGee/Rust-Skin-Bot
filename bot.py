@@ -230,43 +230,43 @@ class RustSkinTelegramBot:
         session = self.get_user_session(user_id, username)
         
         keyboard = [
-            [InlineKeyboardButton("Status", callback_data="status"),
-             InlineKeyboardButton("Purchases", callback_data="purchases")],
-            [InlineKeyboardButton("Set Steam Token", callback_data="settoken"),
-             InlineKeyboardButton("Settings", callback_data="settings")],
-            [InlineKeyboardButton("Start Monitoring", callback_data="startbot"),
-             InlineKeyboardButton("Stop Monitoring", callback_data="stopbot")],
-            [InlineKeyboardButton("Help", callback_data="help"),
-             InlineKeyboardButton("Statistics", callback_data="stats")]
+            [InlineKeyboardButton("📊 My Status", callback_data="status"),
+             InlineKeyboardButton("🛍️ My Purchases", callback_data="purchases")],
+            [InlineKeyboardButton("🔑 Set Steam Token", callback_data="settoken"),
+             InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+            [InlineKeyboardButton("▶️ Start Monitoring", callback_data="startbot"),
+             InlineKeyboardButton("⏹️ Stop Monitoring", callback_data="stopbot")],
+            [InlineKeyboardButton("❓ Help", callback_data="help"),
+             InlineKeyboardButton("📈 Statistics", callback_data="stats")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        status_emoji = "ON" if session['is_monitoring'] else "OFF"
-        token_emoji = "SET" if session['steam_session_token'] else "NOT SET"
+        status_emoji = "🟢" if session['is_monitoring'] else "🔴"
+        token_emoji = "✅" if session['steam_session_token'] else "❌"
         
-        welcome_text = f"""*Welcome to Rust Skin Auto-Purchase Bot!*
+        welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
 
-Hello {username}! I find AND buy new skins from first-time creators automatically!
+👋 Hello {username}! I find AND buy new skins from first-time creators automatically!
 
-**Your Status:**
-Monitoring: {status_emoji}
-Steam Token: {token_emoji}  
-Auto Purchase: {'ENABLED' if session.get('auto_purchase', True) else 'DISABLED'}
-Max Price: ${session.get('max_price_cents', 1000)/100:.2f}
-Progress: {session['purchased_count']}/{session['max_purchases']} items
+📊 **Your Status:**
+{status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
+{token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
+🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
+💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
+🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
 
-**What I Do:**
+🎨 **What I Do:**
 • Monitor SCMM for new items from first-time creators
 • Only buy items that are 3 days old or newer
 • Automatically purchase items within your price limit
 • Send instant notifications of purchases/opportunities
 • Track progress and stop after 10 successful actions
 
-**Quick Start:**
-1. Set your Steam session token with /settoken
-2. Configure auto-purchase in Settings
-3. Start monitoring with /monitor
-4. I'll buy items automatically and notify you!
+**🚀 Quick Start:**
+1️⃣ Set your Steam session token with /settoken
+2️⃣ Configure auto-purchase in ⚙️ Settings
+3️⃣ Start monitoring with /monitor
+4️⃣ I'll buy items automatically and notify you!
 
 Use the buttons below or type /help for more info."""
 
@@ -278,9 +278,9 @@ Use the buttons below or type /help for more info."""
     
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /help command"""
-        help_text = """*Rust Skin Auto-Purchase Bot - Help*
+        help_text = """🤖 *Rust Skin Auto-Purchase Bot - Help*
 
-**Main Commands:**
+**🎯 Main Commands:**
 /start - Show main menu and status
 /monitor - Start monitoring and auto-purchasing
 /stop - Stop monitoring
@@ -290,21 +290,21 @@ Use the buttons below or type /help for more info."""
 /reset - Reset your purchase counter
 /help - Show this help message
 
-**How Auto-Purchase Works:**
+**🔧 How Auto-Purchase Works:**
 1. I monitor the SCMM API every 30 seconds
 2. I look for items from creators with only 1 accepted item
 3. I only consider items that are 3 days old or newer
-4. If auto-purchase is enabled AND price <= your max price
+4. If auto-purchase is enabled AND price ≤ your max price
 5. I automatically place a buy order on Steam Market
 6. You get notified of success/failure immediately
 7. I track up to 10 purchases per user
 
-**Settings You Can Control:**
-• Auto Purchase: Enable/disable automatic buying
-• Max Price: Set maximum price per item ($0.50 - $500)
-• Steam Token: Your session for making purchases
+**⚙️ Settings You Can Control:**
+• **Auto Purchase**: Enable/disable automatic buying
+• **Max Price**: Set maximum price per item ($0.50 - $500)
+• **Steam Token**: Your session for making purchases
 
-**Getting Your Steam Session Token:**
+**🔑 Getting Your Steam Session Token:**
 Your Steam session token allows me to purchase items for you:
 1. Login to Steam in your browser
 2. Open browser dev tools (F12)
@@ -312,21 +312,21 @@ Your Steam session token allows me to purchase items for you:
 4. Find 'sessionid' cookie and copy its value
 5. Send it to me with /settoken
 
-**Privacy & Security:**
+**🛡️ Privacy & Security:**
 • Your token is stored securely and encrypted
 • Each user has completely isolated data
 • No data is shared between users
 • Only used for legitimate Steam Market purchases
 • You control all purchase settings
 
-**Pro Tips:**
+**💡 Pro Tips:**
 • Fund your Steam wallet before starting
 • Set a reasonable max price (I recommend $5-25)
 • Monitor during peak hours for more opportunities
 • Check your Steam inventory after purchase notifications
 • Use /reset when you want to buy 10 more items
 
-**Important Notes:**
+**⚠️ Important Notes:**
 • You need funds in your Steam wallet
 • Steam may have purchase limits/restrictions
 • First-time creators are rare - be patient!
@@ -355,27 +355,27 @@ Need more help? Check the GitHub repository or contact support!"""
         ''', (user_id,))
         total_finds = cursor.fetchone()[0]
         
-        status_text = f"""*Your Bot Status*
+        status_text = f"""📊 *Your Bot Status*
 
-**Monitoring State**
-Status: {'ACTIVE' if session['is_monitoring'] else 'STOPPED'}
-Steam Token: {'CONFIGURED' if session['steam_session_token'] else 'NOT SET'}
-Max Opportunities: {session['max_purchases']}
+🤖 **Monitoring State**
+├ Status: {'🟢 Active' if session['is_monitoring'] else '🔴 Stopped'}
+├ Steam Token: {'✅ Configured' if session['steam_session_token'] else '❌ Not Set'}
+└ Max Opportunities: {session['max_purchases']}
 
-**Your Progress**
-Current Session: {session['purchased_count']}/{session['max_purchases']}
-Last 24 Hours: {recent_finds} opportunities
-Total Found: {total_finds} all-time
-Processed Items: {len(session['processed_skins'])}
+📈 **Your Progress**
+├ Current Session: {session['purchased_count']}/{session['max_purchases']}
+├ Last 24 Hours: {recent_finds} opportunities
+├ Total Found: {total_finds} all-time
+└ Processed Items: {len(session['processed_skins'])}
 
-**System Info**
-Check Interval: 30 seconds
-API: rust.scmm.app
-Target: First-time creators only
-Max Item Age: {session.get('max_item_age_days', 3)} days
-Known Creators: {len(self.known_creators)}
+🔄 **System Info**
+├ Check Interval: 30 seconds
+├ API: rust.scmm.app
+├ Target: First-time creators only
+├ Max Item Age: {session.get('max_item_age_days', 3)} days
+└ Known Creators: {len(self.known_creators)}
 
-**Next Steps:**
+💡 **Next Steps:**
 """
         
         if not session['steam_session_token']:
@@ -387,7 +387,7 @@ Known Creators: {len(self.known_creators)}
         else:
             status_text += "• You're all set! Waiting for opportunities..."
         
-        keyboard = [[InlineKeyboardButton("Back to Main", callback_data="back_main")]]
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         await update.message.reply_text(status_text, parse_mode='Markdown', reply_markup=reply_markup)
@@ -395,14 +395,14 @@ Known Creators: {len(self.known_creators)}
     async def set_token_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /settoken command"""
         await update.message.reply_text(
-            "*Set Your Steam Session Token*\n\n"
+            "🔑 *Set Your Steam Session Token*\n\n"
             "**How to get your token:**\n"
             "1. Login to Steam in your browser\n"
             "2. Open Developer Tools (F12)\n"
             "3. Go to Application → Cookies → steamcommunity.com\n"
             "4. Find 'sessionid' cookie and copy its value\n\n"
             "**Now send me your token** (it will be stored securely):\n\n"
-            "*Make sure you're in a private chat - don't share tokens in groups!*",
+            "⚠️ *Make sure you're in a private chat - don't share tokens in groups!*",
             parse_mode='Markdown'
         )
         context.user_data['waiting_for_token'] = True
@@ -420,14 +420,14 @@ Known Creators: {len(self.known_creators)}
                 context.user_data['waiting_for_token'] = False
                 
                 await update.message.reply_text(
-                    "*Steam token saved successfully!*\n\n"
+                    "✅ *Steam token saved successfully!*\n\n"
                     "You can now start monitoring with /monitor\n\n"
-                    "*Your token is stored securely and will only be used for automatic purchases.*",
+                    "🔐 *Your token is stored securely and will only be used for automatic purchases.*",
                     parse_mode='Markdown'
                 )
             else:
                 await update.message.reply_text(
-                    "That doesn't look like a valid Steam session token.\n\n"
+                    "❌ That doesn't look like a valid Steam session token.\n\n"
                     "Please make sure you copied the full 'sessionid' cookie value and try again."
                 )
         
@@ -465,18 +465,18 @@ Known Creators: {len(self.known_creators)}
         
         if not session['steam_session_token']:
             await update.message.reply_text(
-                "Please set your Steam token first using /settoken\n\n"
+                "❌ Please set your Steam token first using /settoken\n\n"
                 "I need your Steam session token to make purchases for you."
             )
             return
         
         if session['is_monitoring']:
-            await update.message.reply_text("You're already monitoring! Use /stop to stop monitoring.")
+            await update.message.reply_text("⚠️ You're already monitoring! Use /stop to stop monitoring.")
             return
         
         if session['purchased_count'] >= session['max_purchases']:
             await update.message.reply_text(
-                f"You've already found {session['max_purchases']} opportunities!\n\n"
+                f"🛑 You've already found {session['max_purchases']} opportunities!\n\n"
                 "Use /reset to reset your counter and start monitoring again."
             )
             return
@@ -489,7 +489,7 @@ Known Creators: {len(self.known_creators)}
         self.monitoring_tasks[user_id] = task
         
         await update.message.reply_text(
-            f"*Monitoring started!*\n\n"
+            f"🚀 *Monitoring started!*\n\n"
             f"I'm now watching SCMM for first-time creators.\n"
             f"Progress: {session['purchased_count']}/{session['max_purchases']}\n\n"
             f"I'll send you alerts when I find opportunities!\n"
