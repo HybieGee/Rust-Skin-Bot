@@ -261,6 +261,154 @@ Use the buttons below or type /help for more info."""
             reply_markup=reply_markup
         )
     
+    async def status_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /status command"""
+        user_id = update.effective_user.id
+        session = self.get_user_session(user_id)
+        
+        status_text = f"""📊 *Your Bot Status*
+
+🤖 **Current State:**
+Status: {'🟢 Active' if session['is_monitoring'] else '🔴 Stopped'}
+Steam Token: {'✅ Set' if session['steam_session_token'] else '❌ Not Set'}
+Mode: {'🧪 Test Mode' if session.get('test_mode', False) else '💰 Live Mode'}
+
+📈 **Progress:**
+Opportunities Found: {session['purchased_count']}/{session['max_purchases']}
+Processed Items: {len(session['processed_skins'])}
+
+⚙️ **Settings:**
+Auto Purchase: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
+Max Price: ${session.get('max_price_cents', 1000)/100:.2f}
+Max Item Age: {session.get('max_item_age_days', 3)} days"""
+
+        await update.message.reply_text(status_text, parse_mode='Markdown')
+    
+    async def set_token_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /settoken command"""
+        context.user_data['waiting_for_token'] = True
+        
+        token_text = """🔑 *Set Your Steam Session Token*
+
+**How to get your token:**
+1. Login to Steam in your browser
+2. Open Developer Tools (F12)
+3. Go to Application → Cookies → steamcommunity.com
+4. Find 'sessionid' cookie and copy its value
+
+**Now send me your token:**"""
+        
+        await update.message.reply_text(token_text, parse_mode='Markdown')
+    
+    async def start_monitoring_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /monitor command"""
+        user_id = update.effective_user.id
+        session = self.get_user_session(user_id)
+        
+        if session['is_monitoring']:
+            await update.message.reply_text("⚠️ You're already monitoring! Use /stop to stop.")
+            return
+        
+        if not session.get('test_mode', False) and not session['steam_session_token']:
+            await update.message.reply_text("❌ Please set your Steam token first with /settoken\n\n(Or enable test mode with the 🧪 Test Mode button)")
+            return
+        
+        if session['purchased_count'] >= session['max_purchases']:
+            await update.message.reply_text(f"🛑 You've reached the limit of {session['max_purchases']} opportunities! Use /reset to reset your counter.")
+            return
+        
+        # Start monitoring
+        self.update_user_session(user_id, is_monitoring=True)
+        task = asyncio.create_task(self.monitor_user_skins(user_id))
+        self.monitoring_tasks[user_id] = task
+        
+        mode_text = "🧪 TEST MODE" if session.get('test_mode', False) else "💰 LIVE MODE"
+        await update.message.reply_text(f"🚀 *Monitoring started in {mode_text}!*\n\nI'm now scanning for first-time creator opportunities.", parse_mode='Markdown')
+    
+    async def stop_monitoring_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /stop command"""
+        user_id = update.effective_user.id
+        session = self.get_user_session(user_id)
+        
+        if not session['is_monitoring']:
+            await update.message.reply_text("⚠️ You're not currently monitoring.")
+            return
+        
+        # Stop monitoring
+        self.update_user_session(user_id, is_monitoring=False)
+        if user_id in self.monitoring_tasks:
+            self.monitoring_tasks[user_id].cancel()
+            del self.monitoring_tasks[user_id]
+        
+        await update.message.reply_text("⏹️ *Monitoring stopped.*", parse_mode='Markdown')
+    
+    async def purchases_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /purchases command"""
+        user_id = update.effective_user.id
+        
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT skin_name, creator_name, price, purchase_time, success 
+            FROM purchases 
+            WHERE user_id = ?
+            ORDER BY purchase_time DESC 
+            LIMIT 10
+        ''', (user_id,))
+        purchases = cursor.fetchall()
+        
+        if not purchases:
+            await update.message.reply_text("📭 *No opportunities found yet.*\n\nStart monitoring to begin!", parse_mode='Markdown')
+        else:
+            text = "🛍️ *Your Recent Opportunities*\n\n"
+            for skin_name, creator_name, price, purchase_time, success in purchases:
+                status = "✅" if success else "🔍"
+                price_text = f"${price:.2f}" if price > 0 else "N/A"
+                text += f"{status} **{skin_name}** by {creator_name} - {price_text}\n"
+            
+            await update.message.reply_text(text, parse_mode='Markdown')
+    
+    async def reset_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /reset command"""
+        user_id = update.effective_user.id
+        
+        # Reset user data
+        self.update_user_session(user_id, purchased_count=0)
+        session = self.get_user_session(user_id)
+        session['processed_skins'].clear()
+        
+        # Clear processed skins from database
+        cursor = self.conn.cursor()
+        cursor.execute("DELETE FROM processed_skins WHERE user_id = ?", (user_id,))
+        self.conn.commit()
+        
+        await update.message.reply_text("✅ *Your progress has been reset!* You can now find 10 more opportunities.", parse_mode='Markdown')
+    
+    async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /help command"""
+        help_text = """🤖 *Rust Skin Auto-Purchase Bot - Help*
+
+**🔧 Commands:**
+/start - Main menu and status
+/monitor - Start monitoring
+/stop - Stop monitoring
+/status - Check status
+/purchases - View opportunities
+/settoken - Set Steam token
+/reset - Reset counter
+/help - This help
+
+**🎯 How it works:**
+1. Monitors SCMM API for new items
+2. Targets first-time creators (≤1 item)
+3. Only considers recent items (≤3 days)
+4. Auto-purchases within your price limit
+5. Tracks up to 10 opportunities per user
+
+**🧪 Test Mode:**
+Enable to scan without purchasing - perfect for testing!"""
+
+        await update.message.reply_text(help_text, parse_mode='Markdown')
+    
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle button callbacks"""
         query = update.callback_query
@@ -304,208 +452,7 @@ Use the buttons below or type /help for more info."""
                     cursor.execute("DELETE FROM processed_skins WHERE user_id = ?", (user_id,))
                     self.conn.commit()
                     
-                    await query.edit_message_text("✅ Your data has been reset! You can now find 10 more opportunities.")
-            elif query.data == "reset_cancel":
-                await query.edit_message_text("❌ Reset cancelled.")
-            elif query.data == "back_main":
-                await self.show_main_menu_inline(query)
-            else:
-                await query.edit_message_text("❌ Unknown command. Use /start to return to main menu.")
-        except Exception as e:
-            logger.error(f"Error in button callback: {e}")
-            await query.edit_message_text("❌ Something went wrong. Use /start to return to main menu.")
-    
-    async def show_main_menu_inline(self, query):
-        """Show main menu inline"""
-        user_id = query.from_user.id
-        username = query.from_user.username or query.from_user.first_name
-        session = self.get_user_session(user_id, username)
-        
-        keyboard = [
-            [InlineKeyboardButton("📊 My Status", callback_data="status"),
-             InlineKeyboardButton("🛍️ My Purchases", callback_data="purchases")],
-            [InlineKeyboardButton("🔑 Set Steam Token", callback_data="settoken"),
-             InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
-            [InlineKeyboardButton("▶️ Start Monitoring", callback_data="startbot"),
-             InlineKeyboardButton("⏹️ Stop Monitoring", callback_data="stopbot")],
-            [InlineKeyboardButton("🧪 Test Mode", callback_data="test_mode"),
-             InlineKeyboardButton("❓ Help", callback_data="help")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        status_emoji = "🟢" if session['is_monitoring'] else "🔴"
-        token_emoji = "✅" if session['steam_session_token'] else "❌"
-        test_emoji = "🧪" if session.get('test_mode', False) else "💰"
-        
-        welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
-
-👋 Hello {username}! I find AND buy new skins from first-time creators automatically!
-
-📊 **Your Status:**
-{status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
-{token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
-🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
-{test_emoji} **Mode**: {'🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'}
-💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
-🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
-
-🎨 **What I Do:**
-• Monitor SCMM for new items from first-time creators
-• Only consider items that are 3 days old or newer
-• {'Show you opportunities without purchasing (TEST MODE)' if session.get('test_mode', False) else 'Automatically purchase items within your price limit'}
-• Send instant notifications of {'findings' if session.get('test_mode', False) else 'purchases/opportunities'}
-• Track progress and stop after 10 successful actions
-
-**🚀 Quick Start:**
-1️⃣ {'Enable 🧪 Test Mode to scan without purchasing' if not session.get('test_mode', False) else 'You\'re in test mode - perfect for testing!'}
-2️⃣ Start monitoring with ▶️ Start Monitoring
-3️⃣ {'I\'ll show you what I find without buying anything!' if session.get('test_mode', False) else 'Set your Steam token and configure auto-purchase'}
-
-Use the buttons below or type /help for more info."""
-
-        await query.edit_message_text(welcome_text, parse_mode='Markdown', reply_markup=reply_markup)
-    
-    async def toggle_test_mode(self, query):
-        """Toggle test mode"""
-        user_id = query.from_user.id
-        session = self.get_user_session(user_id)
-        
-        new_test_mode = not session.get('test_mode', False)
-        self.update_user_session(user_id, test_mode=new_test_mode)
-        
-        if new_test_mode:
-            text = """🧪 *Test Mode Enabled!*
-
-**What Test Mode Does:**
-• Scans SCMM for first-time creator items
-• Shows you detailed info about what it finds
-• Reports item age, creator details, prices
-• **NO PURCHASES** will be made
-• Perfect for testing the scanning logic
-
-**You'll see reports like:**
-✅ Found first-time creator: "ArtistName"
-📅 Item age: 2 days old (within 3 day limit)
-💰 Price: $5.50 (within your $10 budget)
-🎯 This WOULD be purchased in live mode
-
-**Use ▶️ Start Monitoring to begin test scanning!**"""
-        else:
-            text = """💰 *Live Mode Enabled!*
-
-**What Live Mode Does:**
-• Scans SCMM for first-time creator items  
-• **ACTUALLY PURCHASES** qualifying items
-• Requires Steam session token
-• Uses Selenium for human-like purchasing
-
-**Make sure you:**
-✅ Set your Steam session token
-✅ Fund your Steam wallet
-✅ Configure your max price
-
-**Ready for real purchases!**"""
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
-    
-    async def show_status_inline(self, query):
-        """Show status inline"""
-        user_id = query.from_user.id
-        session = self.get_user_session(user_id)
-        
-        # Get user's recent activity
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT COUNT(*) FROM purchases 
-            WHERE user_id = ? AND purchase_time > datetime('now', '-24 hours')
-        ''', (user_id,))
-        recent_finds = cursor.fetchone()[0]
-        
-        cursor.execute('''
-            SELECT COUNT(*) FROM purchases WHERE user_id = ?
-        ''', (user_id,))
-        total_finds = cursor.fetchone()[0]
-        
-        status_text = f"""📊 *Your Bot Status*
-
-🤖 **Monitoring State**
-├ Status: {'🟢 Active' if session['is_monitoring'] else '🔴 Stopped'}
-├ Steam Token: {'✅ Configured' if session['steam_session_token'] else '❌ Not Set'}
-├ Mode: {'🧪 Test Mode' if session.get('test_mode', False) else '💰 Live Mode'}
-└ Max Opportunities: {session['max_purchases']}
-
-📈 **Your Progress**
-├ Current Session: {session['purchased_count']}/{session['max_purchases']}
-├ Last 24 Hours: {recent_finds} opportunities
-├ Total Found: {total_finds} all-time
-└ Processed Items: {len(session['processed_skins'])}
-
-🔄 **System Info**
-├ Check Interval: 30 seconds
-├ API: rust.scmm.app
-├ Target: First-time creators only
-├ Max Item Age: {session.get('max_item_age_days', 3)} days
-└ Known Creators: {len(self.known_creators)}
-
-💡 **Next Steps:**
-"""
-        
-        if session.get('test_mode', False):
-            status_text += "• You're in test mode - start monitoring to see what I find!"
-        elif not session['steam_session_token']:
-            status_text += "• Set your Steam token with 🔑 Set Steam Token"
-        elif not session['is_monitoring']:
-            status_text += "• Start monitoring with ▶️ Start Monitoring"
-        elif session['purchased_count'] >= session['max_purchases']:
-            status_text += "• Reset counter with /reset to find more"
-        else:
-            status_text += "• You're all set! Waiting for opportunities..."
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(status_text, parse_mode='Markdown', reply_markup=reply_markup)
-    
-    async def show_purchases_inline(self, query):
-        """Show purchases inline"""
-        user_id = query.from_user.id
-        
-        cursor = self.conn.cursor()
-        cursor.execute('''
-            SELECT skin_name, creator_name, price, purchase_time, success 
-            FROM purchases 
-            WHERE user_id = ?
-            ORDER BY purchase_time DESC 
-            LIMIT 20
-        ''', (user_id,))
-        purchases = cursor.fetchall()
-        
-        if not purchases:
-            text = "📭 *No opportunities found yet.*\n\nStart monitoring to begin finding first-time creator opportunities!"
-        else:
-            text = "🛍️ *Your Recent Opportunities*\n\n"
-            for skin_name, creator_name, price, purchase_time, success in purchases:
-                status = "✅" if success else "❌"
-                price_text = f"${price:.2f}" if price > 0 else "Price N/A"
-                
-                # Format datetime
-                try:
-                    dt = datetime.fromisoformat(purchase_time.replace('Z', '+00:00'))
-                    time_str = dt.strftime("%m/%d %H:%M")
-                except:
-                    time_str = "Unknown"
-                
-                text += f"{status} **{skin_name}**\n"
-                text += f"   👤 {creator_name}\n"
-                text += f"   💰 {price_text} • 📅 {time_str}\n\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+                    await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
     async def show_settoken_inline(self, query, context):
         """Show settoken inline"""
@@ -765,7 +712,7 @@ Send me the maximum price you want to spend per item (in USD).
         
         elif context.user_data.get('waiting_for_max_price'):
             try:
-                price_str = update.message.text.strip().replace(', '')
+                price_str = update.message.text.strip().replace(',', '')
                 max_price = float(price_str)
                 
                 if 0.50 <= max_price <= 500:
@@ -1309,4 +1256,205 @@ if __name__ == "__main__":
         exit(1)
     
     bot = RustSkinTelegramBot()
-    bot.run()
+    bot.run()_message_text("✅ Your data has been reset! You can now find 10 more opportunities.")
+            elif query.data == "reset_cancel":
+                await query.edit_message_text("❌ Reset cancelled.")
+            elif query.data == "back_main":
+                await self.show_main_menu_inline(query)
+            else:
+                await query.edit_message_text("❌ Unknown command. Use /start to return to main menu.")
+        except Exception as e:
+            logger.error(f"Error in button callback: {e}")
+            await query.edit_message_text("❌ Something went wrong. Use /start to return to main menu.")
+    
+    async def show_main_menu_inline(self, query):
+        """Show main menu inline"""
+        user_id = query.from_user.id
+        username = query.from_user.username or query.from_user.first_name
+        session = self.get_user_session(user_id, username)
+        
+        keyboard = [
+            [InlineKeyboardButton("📊 My Status", callback_data="status"),
+             InlineKeyboardButton("🛍️ My Purchases", callback_data="purchases")],
+            [InlineKeyboardButton("🔑 Set Steam Token", callback_data="settoken"),
+             InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+            [InlineKeyboardButton("▶️ Start Monitoring", callback_data="startbot"),
+             InlineKeyboardButton("⏹️ Stop Monitoring", callback_data="stopbot")],
+            [InlineKeyboardButton("🧪 Test Mode", callback_data="test_mode"),
+             InlineKeyboardButton("❓ Help", callback_data="help")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        status_emoji = "🟢" if session['is_monitoring'] else "🔴"
+        token_emoji = "✅" if session['steam_session_token'] else "❌"
+        test_emoji = "🧪" if session.get('test_mode', False) else "💰"
+        
+        welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
+
+👋 Hello {username}! I find AND buy new skins from first-time creators automatically!
+
+📊 **Your Status:**
+{status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
+{token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
+🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
+{test_emoji} **Mode**: {'🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'}
+💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
+🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
+
+🎨 **What I Do:**
+• Monitor SCMM for new items from first-time creators
+• Only consider items that are 3 days old or newer
+• {'Show you opportunities without purchasing (TEST MODE)' if session.get('test_mode', False) else 'Automatically purchase items within your price limit'}
+• Send instant notifications of {'findings' if session.get('test_mode', False) else 'purchases/opportunities'}
+• Track progress and stop after 10 successful actions
+
+**🚀 Quick Start:**
+1️⃣ {'Enable 🧪 Test Mode to scan without purchasing' if not session.get('test_mode', False) else 'You\'re in test mode - perfect for testing!'}
+2️⃣ Start monitoring with ▶️ Start Monitoring
+3️⃣ {'I\'ll show you what I find without buying anything!' if session.get('test_mode', False) else 'Set your Steam token and configure auto-purchase'}
+
+Use the buttons below or type /help for more info."""
+
+        await query.edit_message_text(welcome_text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def toggle_test_mode(self, query):
+        """Toggle test mode"""
+        user_id = query.from_user.id
+        session = self.get_user_session(user_id)
+        
+        new_test_mode = not session.get('test_mode', False)
+        self.update_user_session(user_id, test_mode=new_test_mode)
+        
+        if new_test_mode:
+            text = """🧪 *Test Mode Enabled!*
+
+**What Test Mode Does:**
+• Scans SCMM for first-time creator items
+• Shows you detailed info about what it finds
+• Reports item age, creator details, prices
+• **NO PURCHASES** will be made
+• Perfect for testing the scanning logic
+
+**You'll see reports like:**
+✅ Found first-time creator: "ArtistName"
+📅 Item age: 2 days old (within 3 day limit)
+💰 Price: $5.50 (within your $10 budget)
+🎯 This WOULD be purchased in live mode
+
+**Use ▶️ Start Monitoring to begin test scanning!**"""
+        else:
+            text = """💰 *Live Mode Enabled!*
+
+**What Live Mode Does:**
+• Scans SCMM for first-time creator items  
+• **ACTUALLY PURCHASES** qualifying items
+• Requires Steam session token
+• Uses Selenium for human-like purchasing
+
+**Make sure you:**
+✅ Set your Steam session token
+✅ Fund your Steam wallet
+✅ Configure your max price
+
+**Ready for real purchases!**"""
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_status_inline(self, query):
+        """Show status inline"""
+        user_id = query.from_user.id
+        session = self.get_user_session(user_id)
+        
+        # Get user's recent activity
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT COUNT(*) FROM purchases 
+            WHERE user_id = ? AND purchase_time > datetime('now', '-24 hours')
+        ''', (user_id,))
+        recent_finds = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM purchases WHERE user_id = ?
+        ''', (user_id,))
+        total_finds = cursor.fetchone()[0]
+        
+        status_text = f"""📊 *Your Bot Status*
+
+🤖 **Monitoring State**
+├ Status: {'🟢 Active' if session['is_monitoring'] else '🔴 Stopped'}
+├ Steam Token: {'✅ Configured' if session['steam_session_token'] else '❌ Not Set'}
+├ Mode: {'🧪 Test Mode' if session.get('test_mode', False) else '💰 Live Mode'}
+└ Max Opportunities: {session['max_purchases']}
+
+📈 **Your Progress**
+├ Current Session: {session['purchased_count']}/{session['max_purchases']}
+├ Last 24 Hours: {recent_finds} opportunities
+├ Total Found: {total_finds} all-time
+└ Processed Items: {len(session['processed_skins'])}
+
+🔄 **System Info**
+├ Check Interval: 30 seconds
+├ API: rust.scmm.app
+├ Target: First-time creators only
+├ Max Item Age: {session.get('max_item_age_days', 3)} days
+└ Known Creators: {len(self.known_creators)}
+
+💡 **Next Steps:**
+"""
+        
+        if session.get('test_mode', False):
+            status_text += "• You're in test mode - start monitoring to see what I find!"
+        elif not session['steam_session_token']:
+            status_text += "• Set your Steam token with 🔑 Set Steam Token"
+        elif not session['is_monitoring']:
+            status_text += "• Start monitoring with ▶️ Start Monitoring"
+        elif session['purchased_count'] >= session['max_purchases']:
+            status_text += "• Reset counter with /reset to find more"
+        else:
+            status_text += "• You're all set! Waiting for opportunities..."
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(status_text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_purchases_inline(self, query):
+        """Show purchases inline"""
+        user_id = query.from_user.id
+        
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT skin_name, creator_name, price, purchase_time, success 
+            FROM purchases 
+            WHERE user_id = ?
+            ORDER BY purchase_time DESC 
+            LIMIT 20
+        ''', (user_id,))
+        purchases = cursor.fetchall()
+        
+        if not purchases:
+            text = "📭 *No opportunities found yet.*\n\nStart monitoring to begin finding first-time creator opportunities!"
+        else:
+            text = "🛍️ *Your Recent Opportunities*\n\n"
+            for skin_name, creator_name, price, purchase_time, success in purchases:
+                status = "✅" if success else "❌"
+                price_text = f"${price:.2f}" if price > 0 else "Price N/A"
+                
+                # Format datetime
+                try:
+                    dt = datetime.fromisoformat(purchase_time.replace('Z', '+00:00'))
+                    time_str = dt.strftime("%m/%d %H:%M")
+                except:
+                    time_str = "Unknown"
+                
+                text += f"{status} **{skin_name}**\n"
+                text += f"   👤 {creator_name}\n"
+                text += f"   💰 {price_text} • 📅 {time_str}\n\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit
