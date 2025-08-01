@@ -62,6 +62,7 @@ class RustSkinTelegramBot:
                 auto_purchase BOOLEAN DEFAULT TRUE,
                 max_price_cents INTEGER DEFAULT 1000,
                 max_item_age_days INTEGER DEFAULT 3,
+                test_mode BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
@@ -132,6 +133,7 @@ class RustSkinTelegramBot:
                     'auto_purchase': row[6] if len(row) > 6 else True,
                     'max_price_cents': row[7] if len(row) > 7 else 1000,
                     'max_item_age_days': row[8] if len(row) > 8 else 3,
+                    'test_mode': row[9] if len(row) > 9 else False,
                     'processed_skins': set()
                 }
                 
@@ -150,6 +152,7 @@ class RustSkinTelegramBot:
                     'auto_purchase': True,
                     'max_price_cents': 1000,  # $10.00 default max price
                     'max_item_age_days': 3,  # Only buy items from last 3 days
+                    'test_mode': False,  # Test mode for scanning without purchasing
                     'processed_skins': set()
                 }
                 
@@ -208,6 +211,13 @@ class RustSkinTelegramBot:
                 WHERE user_id = ?
             ''', (kwargs['max_price_cents'], user_id))
         
+        if 'test_mode' in kwargs:
+            cursor.execute('''
+                UPDATE user_sessions 
+                SET test_mode = ?, last_active = CURRENT_TIMESTAMP 
+                WHERE user_id = ?
+            ''', (kwargs['test_mode'], user_id))
+        
         self.conn.commit()
     
     def setup_handlers(self):
@@ -236,13 +246,14 @@ class RustSkinTelegramBot:
              InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
             [InlineKeyboardButton("▶️ Start Monitoring", callback_data="startbot"),
              InlineKeyboardButton("⏹️ Stop Monitoring", callback_data="stopbot")],
-            [InlineKeyboardButton("❓ Help", callback_data="help"),
-             InlineKeyboardButton("📈 Statistics", callback_data="stats")]
+            [InlineKeyboardButton("🧪 Test Mode", callback_data="test_mode"),
+             InlineKeyboardButton("❓ Help", callback_data="help")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
         status_emoji = "🟢" if session['is_monitoring'] else "🔴"
         token_emoji = "✅" if session['steam_session_token'] else "❌"
+        test_emoji = "🧪" if session.get('test_mode', False) else "💰"
         
         welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
 
@@ -252,21 +263,21 @@ class RustSkinTelegramBot:
 {status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
 {token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
 🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
+{test_emoji} **Mode**: {'🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'}
 💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
 🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
 
 🎨 **What I Do:**
 • Monitor SCMM for new items from first-time creators
-• Only buy items that are 3 days old or newer
-• Automatically purchase items within your price limit
-• Send instant notifications of purchases/opportunities
+• Only consider items that are 3 days old or newer
+• {'Show you opportunities without purchasing (TEST MODE)' if session.get('test_mode', False) else 'Automatically purchase items within your price limit'}
+• Send instant notifications of {'findings' if session.get('test_mode', False) else 'purchases/opportunities'}
 • Track progress and stop after 10 successful actions
 
 **🚀 Quick Start:**
-1️⃣ Set your Steam session token with /settoken
-2️⃣ Configure auto-purchase in ⚙️ Settings
-3️⃣ Start monitoring with /monitor
-4️⃣ I'll buy items automatically and notify you!
+1️⃣ {'Enable 🧪 Test Mode to scan without purchasing' if not session.get('test_mode', False) else 'You\'re in test mode - perfect for testing!'}
+2️⃣ Start monitoring with ▶️ Start Monitoring
+3️⃣ {'I\'ll show you what I find without buying anything!' if session.get('test_mode', False) else 'Set your Steam token and configure auto-purchase'}
 
 Use the buttons below or type /help for more info."""
 
@@ -611,6 +622,8 @@ Need more help? Check the GitHub repository or contact support!"""
                 await self.show_status_inline(query)  # Same as status for now
             elif query.data == "reset":
                 await self.show_reset_confirmation(query)
+            elif query.data == "test_mode":
+                await self.toggle_test_mode(query)
             elif query.data.startswith("reset_confirm_"):
                 user_id_to_reset = int(query.data.split("_")[-1])
                 if user_id == user_id_to_reset:  # Security check
@@ -774,6 +787,52 @@ Use the buttons below or type /help for more info."""
         
         await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
+    async def toggle_test_mode(self, query):
+        """Toggle test mode"""
+        user_id = query.from_user.id
+        session = self.get_user_session(user_id)
+        
+        new_test_mode = not session.get('test_mode', False)
+        self.update_user_session(user_id, test_mode=new_test_mode)
+        
+        if new_test_mode:
+            text = """🧪 *Test Mode Enabled!*
+
+**What Test Mode Does:**
+• Scans SCMM for first-time creator items
+• Shows you detailed info about what it finds
+• Reports item age, creator details, prices
+• **NO PURCHASES** will be made
+• Perfect for testing the scanning logic
+
+**You'll see reports like:**
+✅ Found first-time creator: "ArtistName"
+📅 Item age: 2 days old (within 3 day limit)
+💰 Price: $5.50 (within your $10 budget)
+🎯 This WOULD be purchased in live mode
+
+**Use ▶️ Start Monitoring to begin test scanning!**"""
+        else:
+            text = """💰 *Live Mode Enabled!*
+
+**What Live Mode Does:**
+• Scans SCMM for first-time creator items  
+• **ACTUALLY PURCHASES** qualifying items
+• Requires Steam session token
+• Uses Selenium for human-like purchasing
+
+**Make sure you:**
+✅ Set your Steam session token
+✅ Fund your Steam wallet
+✅ Configure your max price
+
+**Ready for real purchases!**"""
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    
     async def show_reset_confirmation(self, query):
         """Show reset confirmation"""
         user_id = query.from_user.id
@@ -859,8 +918,9 @@ Need more help? Check the GitHub repository or contact support!"""
         user_id = query.from_user.id
         session = self.get_user_session(user_id)
         
-        if not session['steam_session_token']:
-            text = "❌ Please set your Steam token first using the 🔑 Set Steam Token button"
+        # In test mode, we don't need Steam token
+        if not session.get('test_mode', False) and not session['steam_session_token']:
+            text = "❌ Please set your Steam token first using the 🔑 Set Steam Token button\n\n(Or enable 🧪 Test Mode to scan without purchasing)"
             keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(text, reply_markup=reply_markup)
@@ -887,12 +947,15 @@ Need more help? Check the GitHub repository or contact support!"""
         task = asyncio.create_task(self.monitor_user_skins(user_id))
         self.monitoring_tasks[user_id] = task
         
-        text = f"""🚀 *Monitoring started!*
+        mode_text = "🧪 TEST MODE" if session.get('test_mode', False) else "💰 LIVE MODE"
+        action_text = "scanning and reporting" if session.get('test_mode', False) else "scanning and purchasing"
+        
+        text = f"""🚀 *Monitoring started in {mode_text}!*
 
-I'm now watching SCMM for first-time creators.
+I'm now {action_text} first-time creator items.
 Progress: {session['purchased_count']}/{session['max_purchases']}
 
-I'll send you alerts when I find opportunities!
+{'I\'ll report what I find without making purchases!' if session.get('test_mode', False) else 'I\'ll send you alerts when I find and purchase opportunities!'}
 Use ⏹️ Stop Monitoring to stop anytime."""
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
@@ -1155,7 +1218,7 @@ Send me the maximum price you want to spend per item (in USD).
     async def record_opportunity_for_user(self, user_id: int, item_data: Dict, creator_id: int, 
                                         creator_name: str, item_name: str, item_type: str, 
                                         item_collection: str, workshop_file_id: int):
-        """Record a purchase opportunity and attempt automatic purchase"""
+        """Record a purchase opportunity and attempt automatic purchase (or show test info)"""
         session = self.get_user_session(user_id)
         
         # Add creator to global database
@@ -1183,21 +1246,144 @@ Send me the maximum price you want to spend per item (in USD).
         buy_orders = item_data.get('marketBuyOrderCount', 0)
         sell_orders = item_data.get('marketSellOrderCount', 0)
         
-        # Attempt automatic purchase if enabled and within price limit
-        purchase_success = False
-        purchase_details = ""
+        # Calculate item age for display
+        time_accepted = item_data.get('timeAccepted')
+        time_created = item_data.get('timeCreated')
+        item_age = self.calculate_item_age(time_accepted, time_created)
         
-        if (session['auto_purchase'] and 
-            session['steam_session_token'] and 
-            market_price > 0 and 
-            market_price <= session['max_price_cents']):
+        # TEST MODE - Just show what we found
+        if session.get('test_mode', False):
+            purchase_success = False
+            purchase_details = f"""🧪 **TEST MODE - NO PURCHASE MADE**
+
+📊 **Analysis Results:**
+✅ Creator has ≤1 accepted items (first-time!)
+✅ Item age: {item_age} (within {session.get('max_item_age_days', 3)} day limit)
+💰 Market price: ${market_price/100:.2f} vs your max ${session.get('max_price_cents', 1000)/100:.2f}
+{'✅ Would purchase (within budget)' if market_price <= session.get('max_price_cents', 1000) else '❌ Would skip (over budget)'}
+{'✅ Auto-purchase enabled' if session.get('auto_purchase', True) else '❌ Auto-purchase disabled'}
+
+🎯 **This item WOULD be {'purchased' if (session.get('auto_purchase', True) and market_price <= session.get('max_price_cents', 1000)) else 'skipped'} in live mode**
+
+"""
             
-            try:
-                purchase_result = await self.attempt_steam_purchase(
-                    session['steam_session_token'], 
-                    item_name, 
-                    market_price,
-                    item_data
+        else:
+            # LIVE MODE - Attempt actual purchase
+            purchase_success = False
+            purchase_details = ""
+            
+            if (session['auto_purchase'] and 
+                session['steam_session_token'] and 
+                market_price > 0 and 
+                market_price <= session['max_price_cents']):
+                
+                try:
+                    purchase_result = await self.attempt_steam_purchase(
+                        session['steam_session_token'], 
+                        item_name, 
+                        market_price,
+                        item_data
+                    )
+                    
+                    if purchase_result['success']:
+                        purchase_success = True
+                        purchase_details = f"✅ **PURCHASED SUCCESSFULLY!**\n💰 **Price**: ${purchase_result['price']:.2f}\n"
+                    else:
+                        purchase_details = f"❌ **Purchase Failed**: {purchase_result['error']}\n"
+                        
+                except Exception as e:
+                    purchase_details = f"❌ **Purchase Error**: {str(e)}\n"
+                    logger.error(f"Purchase error for user {user_id}: {e}")
+            
+            elif session['auto_purchase'] and market_price > session['max_price_cents']:
+                purchase_details = f"⚠️ **Price too high**: ${market_price/100:.2f} > ${session['max_price_cents']/100:.2f} (your max)\n"
+            
+            elif not session['auto_purchase']:
+                purchase_details = f"ℹ️ **Auto-purchase disabled** - Manual purchase needed\n"
+        
+        # Build message
+        market_info = ""
+        if market_price > 0:
+            market_info = f"💰 **Market Price**: ${market_price/100:.2f}\n"
+        if buy_orders > 0 or sell_orders > 0:
+            market_info += f"📊 **Orders**: {buy_orders} buy, {sell_orders} sell\n"
+        
+        mode_emoji = "🧪" if session.get('test_mode', False) else ("🎉" if purchase_success else "🎯")
+        mode_text = "TEST SCAN" if session.get('test_mode', False) else ("PURCHASED" if purchase_success else "ALERT")
+        
+        message = f"""{mode_emoji} *FIRST-TIME CREATOR {mode_text}!*
+
+🎨 **Item**: {item_name}
+👤 **Creator**: {creator_name}
+🏷️ **Type**: {item_type}
+📦 **Collection**: {item_collection}
+📅 **Age**: {item_age}
+{market_info}{purchase_details}📈 **Your Progress**: {session['purchased_count']}/{session['max_purchases']}
+
+🔗 **Links**:
+[Steam Market]({steam_url})
+[SCMM Item Page]({scmm_url})"""
+
+        if workshop_url:
+            message += f"\n[Workshop Page]({workshop_url})"
+
+        if session.get('test_mode', False):
+            message += "\n\n🧪 *Test mode active - no purchases made*"
+        elif purchase_success:
+            message += "\n\n🎉 *Item purchased automatically! Check your Steam inventory!*"
+        else:
+            message += "\n\n⚡ *New creator detected - Manual purchase may be needed!*"
+        
+        await self.send_user_message(user_id, message)
+        
+        # Record in database
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO purchases 
+            (user_id, skin_id, creator_id, creator_name, skin_name, purchase_time, price, success) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            user_id,
+            str(item_id),
+            str(creator_id),
+            creator_name,
+            item_name,
+            datetime.now(),
+            market_price / 100 if market_price else 0,
+            purchase_success
+        ))
+        self.conn.commit()
+        
+        mode_text = "test scan" if session.get('test_mode', False) else ("purchase" if purchase_success else "opportunity")
+        logger.info(f"Recorded {mode_text} for user {user_id}: {item_name} by {creator_name}")
+    
+    def calculate_item_age(self, time_accepted: str, time_created: str) -> str:
+        """Calculate and format item age"""
+        try:
+            time_str = time_accepted or time_created
+            if not time_str:
+                return "Unknown age"
+            
+            if time_str.endswith('Z'):
+                item_time = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+            else:
+                item_time = datetime.fromisoformat(time_str)
+            
+            item_time = item_time.replace(tzinfo=None)
+            current_time = datetime.utcnow()
+            age_delta = current_time - item_time
+            
+            if age_delta.days > 0:
+                return f"{age_delta.days} days old"
+            elif age_delta.seconds > 3600:
+                hours = age_delta.seconds // 3600
+                return f"{hours} hours old"
+            else:
+                minutes = age_delta.seconds // 60
+                return f"{minutes} minutes old"
+                
+        except Exception:
+            return "Unknown age"_data
                 )
                 
                 if purchase_result['success']:
