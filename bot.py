@@ -229,29 +229,43 @@ class RustSkinTelegramBot:
         token_emoji = "✅" if session['steam_session_token'] else "❌"
         test_emoji = "🧪" if session.get('test_mode', False) else "💰"
         
+        # Prepare text parts to avoid backslashes in f-strings
+        monitoring_status = 'Active' if session['is_monitoring'] else 'Stopped'
+        token_status = 'Configured' if session['steam_session_token'] else 'Not Set'
+        auto_purchase_status = '✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'
+        mode_status = '🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'
+        max_price = session.get('max_price_cents', 1000) / 100
+        
+        test_mode = session.get('test_mode', False)
+        action_description = 'Show you opportunities without purchasing (TEST MODE)' if test_mode else 'Automatically purchase items within your price limit'
+        notification_type = 'findings' if test_mode else 'purchases/opportunities'
+        
+        quick_start_1 = 'Enable 🧪 Test Mode to scan without purchasing' if not test_mode else "You're in test mode - perfect for testing!"
+        quick_start_3 = "I'll show you what I find without buying anything!" if test_mode else 'Set your Steam token and configure auto-purchase'
+        
         welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
 
 👋 Hello {username}! I find AND buy new skins from first-time creators automatically!
 
 📊 **Your Status:**
-{status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
-{token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
-🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
-{test_emoji} **Mode**: {'🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'}
-💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
+{status_emoji} **Monitoring**: {monitoring_status}
+{token_emoji} **Steam Token**: {token_status}
+🤖 **Auto Purchase**: {auto_purchase_status}
+{test_emoji} **Mode**: {mode_status}
+💰 **Max Price**: ${max_price:.2f}
 🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
 
 🎨 **What I Do:**
 • Monitor SCMM for new items from first-time creators
 • Only consider items that are 3 days old or newer
-• {'Show you opportunities without purchasing (TEST MODE)' if session.get('test_mode', False) else 'Automatically purchase items within your price limit'}
-• Send instant notifications of {'findings' if session.get('test_mode', False) else 'purchases/opportunities'}
+• {action_description}
+• Send instant notifications of {notification_type}
 • Track progress and stop after 10 successful actions
 
 **🚀 Quick Start:**
-1️⃣ {'Enable 🧪 Test Mode to scan without purchasing' if not session.get('test_mode', False) else 'You\'re in test mode - perfect for testing!'}
+1️⃣ {quick_start_1}
 2️⃣ Start monitoring with ▶️ Start Monitoring
-3️⃣ {'I\'ll show you what I find without buying anything!' if session.get('test_mode', False) else 'Set your Steam token and configure auto-purchase'}
+3️⃣ {quick_start_3}
 
 Use the buttons below or type /help for more info."""
 
@@ -492,10 +506,13 @@ Enable to scan without purchasing - perfect for testing!"""
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
+        # Prepare variables to avoid backslashes in f-strings
+        auto_text = '   • Items will be purchased automatically' if session['auto_purchase'] else '   • You will only get notifications'
+        
         settings_text = f"""⚙️ *Your Bot Settings*
 
 🤖 **Auto Purchase**: {auto_status}
-{'   • Items will be purchased automatically' if session['auto_purchase'] else '   • You will only get notifications'}
+{auto_text}
 
 💰 **Max Price**: ${max_price:.2f}
    • Won't buy items above this price
@@ -604,12 +621,15 @@ Need more help? Check the GitHub repository or contact support!"""
         mode_text = "🧪 TEST MODE" if session.get('test_mode', False) else "💰 LIVE MODE"
         action_text = "scanning and reporting" if session.get('test_mode', False) else "scanning and purchasing"
         
+        # Prepare variables to avoid backslashes in f-strings
+        result_text = "I'll report what I find without making purchases!" if session.get('test_mode', False) else "I'll send you alerts when I find and purchase opportunities!"
+        
         text = f"""🚀 *Monitoring started in {mode_text}!*
 
 I'm now {action_text} first-time creator items.
 Progress: {session['purchased_count']}/{session['max_purchases']}
 
-{'I\'ll report what I find without making purchases!' if session.get('test_mode', False) else 'I\'ll send you alerts when I find and purchase opportunities!'}
+{result_text}
 Use ⏹️ Stop Monitoring to stop anytime."""
         
         keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
@@ -908,7 +928,12 @@ Send me the maximum price you want to spend per item (in USD).
         time_created = item_data.get('timeCreated')
         item_age = self.calculate_item_age(time_accepted, time_created)
         
-        # TEST MODE - Just show what we found
+        # Prepare variables to avoid backslashes in f-strings
+        budget_check = '✅ Would purchase (within budget)' if market_price <= session.get('max_price_cents', 1000) else '❌ Would skip (over budget)'
+        auto_purchase_check = '✅ Auto-purchase enabled' if session.get('auto_purchase', True) else '❌ Auto-purchase disabled'
+        
+        would_purchase = 'purchased' if (session.get('auto_purchase', True) and market_price <= session.get('max_price_cents', 1000)) else 'skipped'
+        
         if session.get('test_mode', False):
             purchase_success = False
             purchase_details = f"""🧪 **TEST MODE - NO PURCHASE MADE**
@@ -917,10 +942,10 @@ Send me the maximum price you want to spend per item (in USD).
 ✅ Creator has ≤1 accepted items (first-time!)
 ✅ Item age: {item_age} (within {session.get('max_item_age_days', 3)} day limit)
 💰 Market price: ${market_price/100:.2f} vs your max ${session.get('max_price_cents', 1000)/100:.2f}
-{'✅ Would purchase (within budget)' if market_price <= session.get('max_price_cents', 1000) else '❌ Would skip (over budget)'}
-{'✅ Auto-purchase enabled' if session.get('auto_purchase', True) else '❌ Auto-purchase disabled'}
+{budget_check}
+{auto_purchase_check}
 
-🎯 **This item WOULD be {'purchased' if (session.get('auto_purchase', True) and market_price <= session.get('max_price_cents', 1000)) else 'skipped'} in live mode**
+🎯 **This item WOULD be {would_purchase} in live mode**
 
 """
             
@@ -968,6 +993,16 @@ Send me the maximum price you want to spend per item (in USD).
         mode_emoji = "🧪" if session.get('test_mode', False) else ("🎉" if purchase_success else "🎯")
         mode_text = "TEST SCAN" if session.get('test_mode', False) else ("PURCHASED" if purchase_success else "ALERT")
         
+        # Prepare final message variables
+        test_mode_active = session.get('test_mode', False)
+        
+        if test_mode_active:
+            final_message_suffix = "🧪 *Test mode active - no purchases made*"
+        elif purchase_success:
+            final_message_suffix = "🎉 *Item purchased automatically! Check your Steam inventory!*"
+        else:
+            final_message_suffix = "⚡ *New creator detected - Manual purchase may be needed!*"
+
         message = f"""{mode_emoji} *FIRST-TIME CREATOR {mode_text}!*
 
 🎨 **Item**: {item_name}
@@ -984,12 +1019,7 @@ Send me the maximum price you want to spend per item (in USD).
         if workshop_url:
             message += f"\n[Workshop Page]({workshop_url})"
 
-        if session.get('test_mode', False):
-            message += "\n\n🧪 *Test mode active - no purchases made*"
-        elif purchase_success:
-            message += "\n\n🎉 *Item purchased automatically! Check your Steam inventory!*"
-        else:
-            message += "\n\n⚡ *New creator detected - Manual purchase may be needed!*"
+        message += f"\n\n{final_message_suffix}"
         
         await self.send_user_message(user_id, message)
         
@@ -1289,29 +1319,43 @@ if __name__ == "__main__":
         token_emoji = "✅" if session['steam_session_token'] else "❌"
         test_emoji = "🧪" if session.get('test_mode', False) else "💰"
         
+        # Prepare text parts to avoid backslashes in f-strings
+        monitoring_status = 'Active' if session['is_monitoring'] else 'Stopped'
+        token_status = 'Configured' if session['steam_session_token'] else 'Not Set'
+        auto_purchase_status = '✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'
+        mode_status = '🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'
+        max_price = session.get('max_price_cents', 1000) / 100
+        
+        test_mode = session.get('test_mode', False)
+        action_description = 'Show you opportunities without purchasing (TEST MODE)' if test_mode else 'Automatically purchase items within your price limit'
+        notification_type = 'findings' if test_mode else 'purchases/opportunities'
+        
+        quick_start_1 = 'Enable 🧪 Test Mode to scan without purchasing' if not test_mode else "You're in test mode - perfect for testing!"
+        quick_start_3 = "I'll show you what I find without buying anything!" if test_mode else 'Set your Steam token and configure auto-purchase'
+        
         welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
 
 👋 Hello {username}! I find AND buy new skins from first-time creators automatically!
 
 📊 **Your Status:**
-{status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
-{token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
-🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
-{test_emoji} **Mode**: {'🧪 Test Mode (No Purchases)' if session.get('test_mode', False) else '💰 Live Mode'}
-💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
+{status_emoji} **Monitoring**: {monitoring_status}
+{token_emoji} **Steam Token**: {token_status}
+🤖 **Auto Purchase**: {auto_purchase_status}
+{test_emoji} **Mode**: {mode_status}
+💰 **Max Price**: ${max_price:.2f}
 🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
 
 🎨 **What I Do:**
 • Monitor SCMM for new items from first-time creators
 • Only consider items that are 3 days old or newer
-• {'Show you opportunities without purchasing (TEST MODE)' if session.get('test_mode', False) else 'Automatically purchase items within your price limit'}
-• Send instant notifications of {'findings' if session.get('test_mode', False) else 'purchases/opportunities'}
+• {action_description}
+• Send instant notifications of {notification_type}
 • Track progress and stop after 10 successful actions
 
 **🚀 Quick Start:**
-1️⃣ {'Enable 🧪 Test Mode to scan without purchasing' if not session.get('test_mode', False) else 'You\'re in test mode - perfect for testing!'}
+1️⃣ {quick_start_1}
 2️⃣ Start monitoring with ▶️ Start Monitoring
-3️⃣ {'I\'ll show you what I find without buying anything!' if session.get('test_mode', False) else 'Set your Steam token and configure auto-purchase'}
+3️⃣ {quick_start_3}
 
 Use the buttons below or type /help for more info."""
 
