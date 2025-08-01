@@ -8,15 +8,18 @@ RUN apt-get update && apt-get install -y \
     sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install Python dependencies
+# Copy requirements first for better caching
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Create directory for SQLite database with proper permissions
+# Create directory for SQLite database
 RUN mkdir -p /app/data && chmod 755 /app/data
 
-# Run the bot
+# Expose port for Railway
+EXPOSE $PORT
+
+# Set the start command
 CMD ["python", "bot.py"]
