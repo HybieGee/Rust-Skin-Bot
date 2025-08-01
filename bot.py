@@ -61,7 +61,7 @@ class RustSkinTelegramBot:
                 max_purchases INTEGER DEFAULT 10,
                 auto_purchase BOOLEAN DEFAULT TRUE,
                 max_price_cents INTEGER DEFAULT 1000,
-                max_item_age_days INTEGER DEFAULT 3,
+                max_item_age_days INTEGER DEFAULT 7,
                 test_mode BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -132,7 +132,7 @@ class RustSkinTelegramBot:
                     'max_purchases': row[5],
                     'auto_purchase': row[6] if len(row) > 6 else True,
                     'max_price_cents': row[7] if len(row) > 7 else 1000,
-                    'max_item_age_days': row[8] if len(row) > 8 else 3,
+                    'max_item_age_days': row[8] if len(row) > 8 else 7,
                     'test_mode': row[9] if len(row) > 9 else False,
                     'processed_skins': set()
                 }
@@ -151,7 +151,7 @@ class RustSkinTelegramBot:
                     'max_purchases': 10,
                     'auto_purchase': True,
                     'max_price_cents': 1000,
-                    'max_item_age_days': 3,
+                    'max_item_age_days': 7,
                     'test_mode': False,
                     'processed_skins': set()
                 }
@@ -257,7 +257,7 @@ class RustSkinTelegramBot:
 
 🎨 **What I Do:**
 • Monitor SCMM for new items from first-time creators
-• Only consider items that are 3 days old or newer
+• Only consider items that are 7 days old or newer
 • {action_description}
 • Send instant notifications of {notification_type}
 • Track progress and stop after 10 successful actions
@@ -294,7 +294,7 @@ Processed Items: {len(session['processed_skins'])}
 ⚙️ **Settings:**
 Auto Purchase: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
 Max Price: ${session.get('max_price_cents', 1000)/100:.2f}
-Max Item Age: {session.get('max_item_age_days', 3)} days"""
+Max Item Age: {session.get('max_item_age_days', 7)} days"""
 
         await update.message.reply_text(status_text, parse_mode='Markdown')
     
@@ -414,7 +414,7 @@ Max Item Age: {session.get('max_item_age_days', 3)} days"""
 **🎯 How it works:**
 1. Monitors SCMM API for new items
 2. Targets first-time creators (≤1 item)
-3. Only considers recent items (≤3 days)
+3. Only considers recent items (≤7 days)
 4. Auto-purchases within your price limit
 5. Tracks up to 10 opportunities per user
 
@@ -528,7 +528,7 @@ Enable to scan without purchasing - perfect for testing!"""
 
 🎯 **Purchase Limit**: {session['max_purchases']} opportunities  
 ⏰ **Check Interval**: 30 seconds
-📅 **Max Item Age**: {session.get('max_item_age_days', 3)} days
+📅 **Max Item Age**: {session.get('max_item_age_days', 7)} days
 🎨 **Target**: First-time creators only
 
 **How Auto Purchase Works:**
@@ -569,15 +569,16 @@ Enable to scan without purchasing - perfect for testing!"""
 **🔧 How Auto-Purchase Works:**
 1. I monitor the SCMM API every 30 seconds
 2. I look for items from creators with only 1 accepted item
-3. I only consider items that are 3 days old or newer
+3. I only consider items that are 7 days old or newer
 4. If auto-purchase is enabled AND price ≤ your max price
 5. I automatically place a buy order on Steam Market
 6. You get notified of success/failure immediately
 7. I track up to 10 purchases per user
 
 **🧪 Test Mode:**
-• Enable test mode to scan without purchasing
-• Perfect for testing the logic without funding
+• Enable test mode to scan without spending money
+• **SIMULATES purchases** with fake success/failure results
+• Perfect for testing the bot logic before going live
 • Shows detailed analysis of what would be purchased
 • No Steam token required in test mode
 
@@ -873,7 +874,7 @@ Send me the maximum price you want to spend per item (in USD).
         except Exception as e:
             logger.error(f"Error processing item for user {user_id}: {e}")
     
-    def is_recent_item(self, time_accepted: str, time_created: str, max_age_days: int = 3) -> bool:
+    def is_recent_item(self, time_accepted: str, time_created: str, max_age_days: int = 7) -> bool:
         """Check if item was accepted/created within the specified number of days"""
         try:
             time_str = time_accepted or time_created
@@ -944,17 +945,62 @@ Send me the maximum price you want to spend per item (in USD).
         would_purchase = 'purchased' if (session.get('auto_purchase', True) and market_price <= session.get('max_price_cents', 1000)) else 'skipped'
         
         if session.get('test_mode', False):
-            purchase_success = False
-            purchase_details = f"""🧪 **TEST MODE - NO PURCHASE MADE**
+            import random
+            
+            # Simulate purchase attempt in test mode for testing bot logic
+            would_attempt_purchase = (session.get('auto_purchase', True) and 
+                                    market_price > 0 and 
+                                    market_price <= session.get('max_price_cents', 1000))
+            
+            if would_attempt_purchase:
+                # 70% success rate for fake purchases to simulate realistic conditions
+                purchase_success = random.random() < 0.7
+                if purchase_success:
+                    purchase_details = f"""🧪 **TEST MODE - SIMULATED SUCCESSFUL PURCHASE**
+
+✅ **Fake Purchase Details:**
+💰 Price: ${market_price/100:.2f} (simulated payment)
+🎯 Status: ✅ Successfully "purchased" (fake)
+⚡ Method: Test mode simulation
 
 📊 **Analysis Results:**
 ✅ Creator has ≤1 accepted items (first-time!)
-✅ Item age: {item_age} (within {session.get('max_item_age_days', 3)} day limit)
+✅ Item age: {item_age} (within {session.get('max_item_age_days', 7)} day limit)
+✅ Price within budget: ${market_price/100:.2f} ≤ ${session.get('max_price_cents', 1000)/100:.2f}
+✅ Auto-purchase enabled
+
+🧪 **This WOULD be a real purchase in live mode!**
+
+"""
+                else:
+                    purchase_details = f"""🧪 **TEST MODE - SIMULATED FAILED PURCHASE**
+
+❌ **Fake Purchase Details:** 
+💰 Price: ${market_price/100:.2f} (would have been paid)
+🎯 Status: ❌ "Purchase failed" (simulated error)
+⚡ Error: Random test failure (item sold out, network error, etc.)
+
+📊 **Analysis Results:**
+✅ Creator has ≤1 accepted items (first-time!)
+✅ Item age: {item_age} (within {session.get('max_item_age_days', 7)} day limit)
+✅ Price within budget: ${market_price/100:.2f} ≤ ${session.get('max_price_cents', 1000)/100:.2f}
+✅ Auto-purchase enabled
+
+🧪 **This shows how failed purchases are handled!**
+
+"""
+            else:
+                purchase_success = False
+                purchase_details = f"""🧪 **TEST MODE - WOULD NOT PURCHASE**
+
+📊 **Analysis Results:**
+✅ Creator has ≤1 accepted items (first-time!)
+✅ Item age: {item_age} (within {session.get('max_item_age_days', 7)} day limit)
 💰 Market price: ${market_price/100:.2f} vs your max ${session.get('max_price_cents', 1000)/100:.2f}
 {budget_check}
 {auto_purchase_check}
 
-🎯 **This item WOULD be {would_purchase} in live mode**
+🎯 **This item would be SKIPPED in live mode**
 
 """
             
@@ -1300,17 +1346,18 @@ Send me the maximum price you want to spend per item (in USD).
             text = """🧪 *Test Mode Enabled!*
 
 **What Test Mode Does:**
-• Scans SCMM for first-time creator items
+• Scans SCMM for first-time creator items (expanded to 7 days!)
 • Shows you detailed info about what it finds
 • Reports item age, creator details, prices
-• **NO PURCHASES** will be made
-• Perfect for testing the scanning logic
+• **SIMULATES purchases** with fake success/failure results
+• Perfect for testing the bot logic without spending money
 
 **You'll see reports like:**
 ✅ Found first-time creator: "ArtistName"
-📅 Item age: 2 days old (within 3 day limit)
+📅 Item age: 2 days old (within 7 day limit)
 💰 Price: $5.50 (within your $10 budget)
-🎯 This WOULD be purchased in live mode
+🧪 **SIMULATED SUCCESSFUL PURCHASE** (fake)
+🎯 This WOULD be a real purchase in live mode
 
 **Use ▶️ Start Monitoring to begin test scanning!**"""
         else:
@@ -1384,7 +1431,7 @@ Send me the maximum price you want to spend per item (in USD).
 
 🎨 **What I Do:**
 • Monitor SCMM for new items from first-time creators
-• Only consider items that are 3 days old or newer
+• Only consider items that are 7 days old or newer
 • {action_description}
 • Send instant notifications of {notification_type}
 • Track progress and stop after 10 successful actions
