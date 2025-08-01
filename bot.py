@@ -1268,78 +1268,214 @@ Send me the maximum price you want to spend per item (in USD).
     
     async def attempt_steam_purchase(self, steam_session_token: str, item_name: str, 
                                    price_cents: int, item_data: Dict) -> Dict:
-        """Attempt to purchase item from Steam Community Market"""
+        """Attempt to purchase item from Steam Community Market using Selenium"""
         try:
-            # Steam market purchase requires several steps:
-            # 1. Get market listing hash
-            # 2. Get buy order info  
-            # 3. Place buy order
+            from selenium import webdriver
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.common.action_chains import ActionChains
+            import time
+            import random
             
-            market_hash_name = item_name
-            app_id = 252490  # Rust app ID
+            # Setup Chrome options for headless operation
+            chrome_options = Options()
+            chrome_options.add_argument('--headless')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
             
-            # Steam session cookies
-            cookies = {
-                'sessionid': steam_session_token,
-                'steamLoginSecure': steam_session_token  # May need actual steamLoginSecure value
-            }
+            # Create webdriver
+            driver = webdriver.Chrome(options=chrome_options)
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': f'https://steamcommunity.com/market/listings/{app_id}/{market_hash_name}',
-                'Origin': 'https://steamcommunity.com'
-            }
-            
-            # Step 1: Get market listing data
-            listing_url = f'https://steamcommunity.com/market/listings/{app_id}/{market_hash_name}'
-            response = requests.get(listing_url, cookies=cookies, headers=headers, timeout=10)
-            
-            if response.status_code != 200:
-                return {'success': False, 'error': 'Failed to access market listing'}
-            
-            # Step 2: Attempt to place buy order at current lowest price
-            # Note: This is a simplified approach - Steam's actual API is more complex
-            
-            buy_order_url = 'https://steamcommunity.com/market/createbuyorder/'
-            
-            buy_data = {
-                'sessionid': steam_session_token,
-                'currency': 1,  # USD
-                'appid': app_id,
-                'market_hash_name': market_hash_name,
-                'price_total': price_cents,  # Price in cents
-                'quantity': 1,
-                'billing_state': '',
-                'save_my_address': '0'
-            }
-            
-            # Place buy order
-            buy_response = requests.post(
-                buy_order_url, 
-                data=buy_data, 
-                cookies=cookies, 
-                headers=headers,
-                timeout=15
-            )
-            
-            if buy_response.status_code == 200:
-                result = buy_response.json()
-                if result.get('success') == 1:
-                    return {
-                        'success': True, 
-                        'price': price_cents / 100,
-                        'order_id': result.get('buy_orderid', 'Unknown')
-                    }
-                else:
-                    return {
-                        'success': False, 
-                        'error': result.get('message', 'Unknown Steam error')
-                    }
-            else:
-                return {'success': False, 'error': f'HTTP {buy_response.status_code}'}
+            try:
+                # Set session cookies to login
+                driver.get('https://steamcommunity.com')
                 
+                # Add session cookies
+                driver.add_cookie({
+                    'name': 'sessionid',
+                    'value': steam_session_token,
+                    'domain': '.steamcommunity.com'
+                })
+                
+                # Human-like delay
+                await asyncio.sleep(random.uniform(1.5, 3.0))
+                
+                # Navigate to market listing
+                market_url = f'https://steamcommunity.com/market/listings/252490/{item_name.replace(" ", "%20")}'
+                driver.get(market_url)
+                
+                # Wait for page to load with human-like timeout
+                wait = WebDriverWait(driver, 15)
+                
+                # Human-like scrolling behavior
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight/3);")
+                await asyncio.sleep(random.uniform(0.8, 1.5))
+                
+                # Look for buy order section
+                try:
+                    # Find the "Create Buy Order" button or similar
+                    buy_order_button = wait.until(
+                        EC.element_to_be_clickable((By.ID, "market_buynow_dialog_purchase"))
+                    )
+                    
+                    # Human-like mouse movement and click
+                    actions = ActionChains(driver)
+                    actions.move_to_element(buy_order_button)
+                    await asyncio.sleep(random.uniform(0.3, 0.7))
+                    actions.click()
+                    actions.perform()
+                    
+                    # Wait for purchase dialog
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                    
+                    # Look for purchase confirmation
+                    confirm_button = wait.until(
+                        EC.element_to_be_clickable((By.ID, "market_buynow_dialog_purchase_final"))
+                    )
+                    
+                    # Final human-like delay before confirming
+                    await asyncio.sleep(random.uniform(0.5, 1.2))
+                    
+                    # Click confirm
+                    actions = ActionChains(driver)
+                    actions.move_to_element(confirm_button)
+                    actions.click()
+                    actions.perform()
+                    
+                    # Wait for confirmation
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    
+                    # Check for success indicators
+                    success_indicators = [
+                        "market_buynow_dialog_success",
+                        "Your purchase was successful",
+                        "has been added to your inventory"
+                    ]
+                    
+                    page_source = driver.page_source.lower()
+                    
+                    for indicator in success_indicators:
+                        if indicator.lower() in page_source:
+                            return {
+                                'success': True,
+                                'price': price_cents / 100,
+                                'method': 'selenium_purchase'
+                            }
+                    
+                    # If no success indicators found, check for errors
+                    error_indicators = [
+                        "insufficient funds",
+                        "purchase failed",
+                        "error occurred",
+                        "unable to purchase"
+                    ]
+                    
+                    for error in error_indicators:
+                        if error in page_source:
+                            return {
+                                'success': False,
+                                'error': f'Purchase failed: {error}',
+                                'method': 'selenium_purchase'
+                            }
+                    
+                    # Unknown result
+                    return {
+                        'success': False,
+                        'error': 'Unknown purchase result',
+                        'method': 'selenium_purchase'
+                    }
+                    
+                except Exception as purchase_error:
+                    # Try alternative approach - direct buy now if available
+                    try:
+                        # Look for "Buy Now" listings instead of buy orders
+                        buy_now_buttons = driver.find_elements(By.CLASS_NAME, "market_listing_buy_button")
+                        
+                        if buy_now_buttons:
+                            # Find the cheapest listing within our price range
+                            for button in buy_now_buttons[:3]:  # Check first 3 listings
+                                # Human-like behavior
+                                await asyncio.sleep(random.uniform(0.8, 1.5))
+                                
+                                # Get price of this listing
+                                try:
+                                    price_element = button.find_element(By.CLASS_NAME, "market_listing_price")
+                                    listing_price_text = price_element.text
+                                    
+                                    # Parse price (basic parsing)
+                                    if "$" in listing_price_text:
+                                        price_value = float(listing_price_text.replace("$", "").replace(",", ""))
+                                        
+                                        # If within our budget, try to buy
+                                        if price_value <= (price_cents / 100):
+                                            # Click the buy button
+                                            actions = ActionChains(driver)
+                                            actions.move_to_element(button)
+                                            await asyncio.sleep(random.uniform(0.3, 0.8))
+                                            actions.click()
+                                            actions.perform()
+                                            
+                                            # Wait and confirm purchase
+                                            await asyncio.sleep(random.uniform(1.5, 2.5))
+                                            
+                                            # Look for confirmation dialog
+                                            try:
+                                                confirm_purchase = wait.until(
+                                                    EC.element_to_be_clickable((By.ID, "market_buynow_dialog_purchase_final"))
+                                                )
+                                                
+                                                await asyncio.sleep(random.uniform(0.5, 1.0))
+                                                confirm_purchase.click()
+                                                
+                                                await asyncio.sleep(random.uniform(2.0, 3.0))
+                                                
+                                                # Check for success
+                                                if "success" in driver.page_source.lower():
+                                                    return {
+                                                        'success': True,
+                                                        'price': price_value,
+                                                        'method': 'selenium_buy_now'
+                                                    }
+                                            except:
+                                                continue
+                                
+                                except Exception:
+                                    continue
+                        
+                        return {
+                            'success': False,
+                            'error': 'No suitable listings found within price range',
+                            'method': 'selenium_purchase'
+                        }
+                        
+                    except Exception as alt_error:
+                        return {
+                            'success': False,
+                            'error': f'Alternative purchase method failed: {str(alt_error)}',
+                            'method': 'selenium_purchase'
+                        }
+            
+            finally:
+                # Always close the browser
+                driver.quit()
+                
+        except ImportError:
+            return {
+                'success': False,
+                'error': 'Selenium not installed. Please install: pip install selenium',
+                'method': 'selenium_purchase'
+            }
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {
+                'success': False,
+                'error': f'Selenium purchase error: {str(e)}',
+                'method': 'selenium_purchase'
+            }
     
     async def is_first_time_creator(self, creator_id: int, creator_name: str) -> bool:
         """Check if this is a creator's first skin using SCMM profile API"""
@@ -1418,9 +1554,33 @@ Send me the maximum price you want to spend per item (in USD).
             logger.error(f"Error sending message to user {user_id}: {e}")
     
     def run(self):
-        """Start the bot"""
+        """Start the bot with conflict handling"""
         logger.info("Starting Multi-User Rust Skin Telegram Bot...")
-        self.application.run_polling()
+        
+        # Add error handler for conflicts
+        async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+            """Log errors and handle conflicts"""
+            logger.error(f"Exception while handling an update: {context.error}")
+            
+            # If it's a conflict error, try to continue
+            if "Conflict" in str(context.error):
+                logger.warning("Bot conflict detected, continuing...")
+                return
+        
+        # Add the error handler
+        self.application.add_error_handler(error_handler)
+        
+        try:
+            # Try to start with polling
+            self.application.run_polling(
+                drop_pending_updates=True,  # Clear any pending updates
+                allowed_updates=Update.ALL_TYPES
+            )
+        except Exception as e:
+            logger.error(f"Failed to start bot: {e}")
+            if "Conflict" in str(e):
+                logger.error("Another bot instance is running. Please stop other instances first.")
+            raise
 
 if __name__ == "__main__":
     # Environment variables required:
