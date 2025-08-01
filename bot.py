@@ -588,76 +588,377 @@ Need more help? Check the GitHub repository or contact support!"""
         
         user_id = update.effective_user.id
         
-        if query.data == "status":
-            await self.status_command(update, context)
-        elif query.data == "purchases":
-            await self.purchases_command(update, context)
-        elif query.data == "settoken":
-            await self.set_token_command(update, context)
-        elif query.data == "settings":
-            await self.show_settings_menu(query)
-        elif query.data == "toggle_auto_purchase":
-            await self.toggle_auto_purchase(query)
-        elif query.data == "set_max_price":
-            await self.set_max_price_prompt(query, context)
-        elif query.data == "startbot":
-            await self.start_monitoring_command(update, context)
-        elif query.data == "stopbot":
-            await self.stop_monitoring_command(update, context)
-        elif query.data == "help":
-            await self.help_command(update, context)
-        elif query.data.startswith("reset_confirm_"):
-            user_id_to_reset = int(query.data.split("_")[-1])
-            if user_id == user_id_to_reset:  # Security check
-                # Reset user data
-                self.update_user_session(user_id, purchased_count=0)
-                session = self.get_user_session(user_id)
-                session['processed_skins'].clear()
+        try:
+            if query.data == "status":
+                await self.show_status_inline(query)
+            elif query.data == "purchases":
+                await self.show_purchases_inline(query)
+            elif query.data == "settoken":
+                await self.show_settoken_inline(query, context)
+            elif query.data == "settings":
+                await self.show_settings_menu(query)
+            elif query.data == "toggle_auto_purchase":
+                await self.toggle_auto_purchase(query)
+            elif query.data == "set_max_price":
+                await self.set_max_price_prompt(query, context)
+            elif query.data == "startbot":
+                await self.start_monitoring_inline(query)
+            elif query.data == "stopbot":
+                await self.stop_monitoring_inline(query)
+            elif query.data == "help":
+                await self.show_help_inline(query)
+            elif query.data == "stats":
+                await self.show_status_inline(query)  # Same as status for now
+            elif query.data == "reset":
+                await self.show_reset_confirmation(query)
+            elif query.data.startswith("reset_confirm_"):
+                user_id_to_reset = int(query.data.split("_")[-1])
+                if user_id == user_id_to_reset:  # Security check
+                    # Reset user data
+                    self.update_user_session(user_id, purchased_count=0)
+                    session = self.get_user_session(user_id)
+                    session['processed_skins'].clear()
+                    
+                    # Clear processed skins from database
+                    cursor = self.conn.cursor()
+                    cursor.execute("DELETE FROM processed_skins WHERE user_id = ?", (user_id,))
+                    self.conn.commit()
+                    
+                    await query.edit_message_text("✅ Your data has been reset! You can now find 10 more opportunities.")
+            elif query.data == "reset_cancel":
+                await query.edit_message_text("❌ Reset cancelled.")
+            elif query.data == "back_main":
+                await self.show_main_menu_inline(query)
+            else:
+                await query.edit_message_text("❌ Unknown command. Use /start to return to main menu.")
+        except Exception as e:
+            logger.error(f"Error in button callback: {e}")
+            await query.edit_message_text("❌ Something went wrong. Use /start to return to main menu.")
+    
+    async def show_main_menu_inline(self, query):
+        """Show main menu inline"""
+        user_id = query.from_user.id
+        username = query.from_user.username or query.from_user.first_name
+        session = self.get_user_session(user_id, username)
+        
+        keyboard = [
+            [InlineKeyboardButton("📊 My Status", callback_data="status"),
+             InlineKeyboardButton("🛍️ My Purchases", callback_data="purchases")],
+            [InlineKeyboardButton("🔑 Set Steam Token", callback_data="settoken"),
+             InlineKeyboardButton("⚙️ Settings", callback_data="settings")],
+            [InlineKeyboardButton("▶️ Start Monitoring", callback_data="startbot"),
+             InlineKeyboardButton("⏹️ Stop Monitoring", callback_data="stopbot")],
+            [InlineKeyboardButton("❓ Help", callback_data="help"),
+             InlineKeyboardButton("📈 Statistics", callback_data="stats")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        status_emoji = "🟢" if session['is_monitoring'] else "🔴"
+        token_emoji = "✅" if session['steam_session_token'] else "❌"
+        
+        welcome_text = f"""🤖 *Welcome to Rust Skin Auto-Purchase Bot!*
+
+👋 Hello {username}! I find AND buy new skins from first-time creators automatically!
+
+📊 **Your Status:**
+{status_emoji} **Monitoring**: {'Active' if session['is_monitoring'] else 'Stopped'}
+{token_emoji} **Steam Token**: {'Configured' if session['steam_session_token'] else 'Not Set'}
+🤖 **Auto Purchase**: {'✅ Enabled' if session.get('auto_purchase', True) else '❌ Disabled'}
+💰 **Max Price**: ${session.get('max_price_cents', 1000)/100:.2f}
+🎯 **Progress**: {session['purchased_count']}/{session['max_purchases']} items
+
+🎨 **What I Do:**
+• Monitor SCMM for new items from first-time creators
+• Only buy items that are 3 days old or newer
+• Automatically purchase items within your price limit
+• Send instant notifications of purchases/opportunities
+• Track progress and stop after 10 successful actions
+
+**🚀 Quick Start:**
+1️⃣ Set your Steam session token with /settoken
+2️⃣ Configure auto-purchase in ⚙️ Settings
+3️⃣ Start monitoring with /monitor
+4️⃣ I'll buy items automatically and notify you!
+
+Use the buttons below or type /help for more info."""
+
+        await query.edit_message_text(welcome_text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_status_inline(self, query):
+        """Show status inline"""
+        user_id = query.from_user.id
+        session = self.get_user_session(user_id)
+        
+        # Get user's recent activity
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT COUNT(*) FROM purchases 
+            WHERE user_id = ? AND purchase_time > datetime('now', '-24 hours')
+        ''', (user_id,))
+        recent_finds = cursor.fetchone()[0]
+        
+        cursor.execute('''
+            SELECT COUNT(*) FROM purchases WHERE user_id = ?
+        ''', (user_id,))
+        total_finds = cursor.fetchone()[0]
+        
+        status_text = f"""📊 *Your Bot Status*
+
+🤖 **Monitoring State**
+├ Status: {'🟢 Active' if session['is_monitoring'] else '🔴 Stopped'}
+├ Steam Token: {'✅ Configured' if session['steam_session_token'] else '❌ Not Set'}
+└ Max Opportunities: {session['max_purchases']}
+
+📈 **Your Progress**
+├ Current Session: {session['purchased_count']}/{session['max_purchases']}
+├ Last 24 Hours: {recent_finds} opportunities
+├ Total Found: {total_finds} all-time
+└ Processed Items: {len(session['processed_skins'])}
+
+🔄 **System Info**
+├ Check Interval: 30 seconds
+├ API: rust.scmm.app
+├ Target: First-time creators only
+├ Max Item Age: {session.get('max_item_age_days', 3)} days
+└ Known Creators: {len(self.known_creators)}
+
+💡 **Next Steps:**
+"""
+        
+        if not session['steam_session_token']:
+            status_text += "• Set your Steam token with /settoken"
+        elif not session['is_monitoring']:
+            status_text += "• Start monitoring with /monitor"
+        elif session['purchased_count'] >= session['max_purchases']:
+            status_text += "• Reset counter with /reset to find more"
+        else:
+            status_text += "• You're all set! Waiting for opportunities..."
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(status_text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_purchases_inline(self, query):
+        """Show purchases inline"""
+        user_id = query.from_user.id
+        
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            SELECT skin_name, creator_name, price, purchase_time, success 
+            FROM purchases 
+            WHERE user_id = ?
+            ORDER BY purchase_time DESC 
+            LIMIT 20
+        ''', (user_id,))
+        purchases = cursor.fetchall()
+        
+        if not purchases:
+            text = "📭 *No opportunities found yet.*\n\nStart monitoring with /monitor to begin finding first-time creator opportunities!"
+        else:
+            text = "🛍️ *Your Recent Opportunities*\n\n"
+            for skin_name, creator_name, price, purchase_time, success in purchases:
+                status = "✅" if success else "❌"
+                price_text = f"${price:.2f}" if price > 0 else "Price N/A"
                 
-                # Clear processed skins from database
-                cursor = self.conn.cursor()
-                cursor.execute("DELETE FROM processed_skins WHERE user_id = ?", (user_id,))
-                self.conn.commit()
+                # Format datetime
+                dt = datetime.fromisoformat(purchase_time.replace('Z', '+00:00'))
+                time_str = dt.strftime("%m/%d %H:%M")
                 
-                await query.edit_message_text("Your data has been reset! You can now find 10 more opportunities.")
-        elif query.data == "reset_cancel":
-            await query.edit_message_text("Reset cancelled.")
-        elif query.data == "back_main":
-            await self.start_command(update, context)
+                text += f"{status} **{skin_name}**\n"
+                text += f"   👤 {creator_name}\n"
+                text += f"   💰 {price_text} • 📅 {time_str}\n\n"
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_reset_confirmation(self, query):
+        """Show reset confirmation"""
+        user_id = query.from_user.id
+        
+        keyboard = [
+            [InlineKeyboardButton("✅ Yes, Reset Everything", callback_data=f"reset_confirm_{user_id}")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="reset_cancel")],
+            [InlineKeyboardButton("🔙 Back to Settings", callback_data="settings")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        text = """⚠️ *Reset Your Data*
+
+This will reset:
+• Your opportunity counter to 0
+• Your processed items list
+• Allow you to find 10 more opportunities
+
+Your Steam token and purchase history will be kept.
+
+Are you sure?"""
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_settoken_inline(self, query, context):
+        """Show settoken inline"""
+        context.user_data['waiting_for_token'] = True
+        
+        text = """🔑 *Set Your Steam Session Token*
+
+**How to get your token:**
+1. Login to Steam in your browser
+2. Open Developer Tools (F12)
+3. Go to Application → Cookies → steamcommunity.com
+4. Find 'sessionid' cookie and copy its value
+
+**Now send me your token** (it will be stored securely):
+
+⚠️ *Make sure you're in a private chat - don't share tokens in groups!*"""
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def show_help_inline(self, query):
+        """Show help inline"""
+        help_text = """🤖 *Rust Skin Auto-Purchase Bot - Help*
+
+**🎯 Main Commands:**
+/start - Show main menu and status
+/monitor - Start monitoring and auto-purchasing
+/stop - Stop monitoring
+/status - Check your current status
+/purchases - View your purchase history
+/settoken - Set your Steam session token
+/reset - Reset your purchase counter
+/help - Show this help message
+
+**🔧 How Auto-Purchase Works:**
+1. I monitor the SCMM API every 30 seconds
+2. I look for items from creators with only 1 accepted item
+3. I only consider items that are 3 days old or newer
+4. If auto-purchase is enabled AND price ≤ your max price
+5. I automatically place a buy order on Steam Market
+6. You get notified of success/failure immediately
+7. I track up to 10 purchases per user
+
+**⚙️ Settings You Can Control:**
+• **Auto Purchase**: Enable/disable automatic buying
+• **Max Price**: Set maximum price per item ($0.50 - $500)
+• **Steam Token**: Your session for making purchases
+
+Need more help? Check the GitHub repository or contact support!"""
+
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(help_text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def start_monitoring_inline(self, query):
+        """Start monitoring inline"""
+        user_id = query.from_user.id
+        session = self.get_user_session(user_id)
+        
+        if not session['steam_session_token']:
+            text = "❌ Please set your Steam token first using the 🔑 Set Steam Token button"
+            keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup)
+            return
+        
+        if session['is_monitoring']:
+            text = "⚠️ You're already monitoring! Use ⏹️ Stop Monitoring to stop."
+            keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup)
+            return
+        
+        if session['purchased_count'] >= session['max_purchases']:
+            text = f"🛑 You've already found {session['max_purchases']} opportunities!\n\nUse /reset to reset your counter and start monitoring again."
+            keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup)
+            return
+        
+        # Start monitoring
+        self.update_user_session(user_id, is_monitoring=True)
+        
+        # Start monitoring task
+        task = asyncio.create_task(self.monitor_user_skins(user_id))
+        self.monitoring_tasks[user_id] = task
+        
+        text = f"""🚀 *Monitoring started!*
+
+I'm now watching SCMM for first-time creators.
+Progress: {session['purchased_count']}/{session['max_purchases']}
+
+I'll send you alerts when I find opportunities!
+Use ⏹️ Stop Monitoring to stop anytime."""
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    
+    async def stop_monitoring_inline(self, query):
+        """Stop monitoring inline"""
+        user_id = query.from_user.id
+        session = self.get_user_session(user_id)
+        
+        if not session['is_monitoring']:
+            text = "⚠️ You're not currently monitoring."
+            keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(text, reply_markup=reply_markup)
+            return
+        
+        # Stop monitoring
+        self.update_user_session(user_id, is_monitoring=False)
+        
+        # Cancel monitoring task
+        if user_id in self.monitoring_tasks:
+            self.monitoring_tasks[user_id].cancel()
+            del self.monitoring_tasks[user_id]
+        
+        text = "⏹️ *Monitoring stopped.*\n\nUse ▶️ Start Monitoring to start monitoring again anytime!"
+        keyboard = [[InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
     async def show_settings_menu(self, query):
         """Show settings menu"""
         user_id = query.from_user.id
         session = self.get_user_session(user_id)
         
-        auto_status = "ENABLED" if session['auto_purchase'] else "DISABLED"
+        auto_status = "✅ ENABLED" if session['auto_purchase'] else "❌ DISABLED"
         max_price = session['max_price_cents'] / 100
         
         keyboard = [
-            [InlineKeyboardButton(f"Auto Purchase: {auto_status}", callback_data="toggle_auto_purchase")],
-            [InlineKeyboardButton(f"Max Price: ${max_price:.2f}", callback_data="set_max_price")],
-            [InlineKeyboardButton("Update Steam Token", callback_data="settoken")],
-            [InlineKeyboardButton("Reset Progress", callback_data="reset")],
-            [InlineKeyboardButton("Back to Main", callback_data="back_main")]
+            [InlineKeyboardButton(f"🤖 Auto Purchase: {auto_status}", callback_data="toggle_auto_purchase")],
+            [InlineKeyboardButton(f"💰 Max Price: ${max_price:.2f}", callback_data="set_max_price")],
+            [InlineKeyboardButton("🔑 Update Steam Token", callback_data="settoken")],
+            [InlineKeyboardButton("🔄 Reset Progress", callback_data="reset")],
+            [InlineKeyboardButton("🔙 Back to Main", callback_data="back_main")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         
-        settings_text = f"""*Your Bot Settings*
+        settings_text = f"""⚙️ *Your Bot Settings*
 
-**Auto Purchase**: {auto_status}
-{'Items will be purchased automatically' if session['auto_purchase'] else 'You will only get notifications'}
+🤖 **Auto Purchase**: {auto_status}
+{'   • Items will be purchased automatically' if session['auto_purchase'] else '   • You will only get notifications'}
 
-**Max Price**: ${max_price:.2f}
-Won't buy items above this price
+💰 **Max Price**: ${max_price:.2f}
+   • Won't buy items above this price
 
-**Purchase Limit**: {session['max_purchases']} opportunities  
-**Check Interval**: 30 seconds
-**Max Item Age**: {session.get('max_item_age_days', 3)} days
-**Target**: First-time creators only
+🎯 **Purchase Limit**: {session['max_purchases']} opportunities  
+⏰ **Check Interval**: 30 seconds
+📅 **Max Item Age**: {session.get('max_item_age_days', 3)} days
+🎨 **Target**: First-time creators only
 
 **How Auto Purchase Works:**
 • When a first-time creator item is found
-• If auto purchase is enabled AND price <= max price  
+• If auto purchase is enabled AND price ≤ max price  
 • Bot will attempt to buy it automatically
 • You'll get notified of success/failure
 
@@ -673,24 +974,28 @@ Won't buy items above this price
         new_setting = not session['auto_purchase']
         self.update_user_session(user_id, auto_purchase=new_setting)
         
-        status = "enabled" if new_setting else "disabled"
-        await query.answer(f"Auto purchase {status}!")
+        # Show updated settings menu
         await self.show_settings_menu(query)
     
     async def set_max_price_prompt(self, query, context):
         """Prompt user to set max price"""
         context.user_data['waiting_for_max_price'] = True
         
-        await query.edit_message_text(
-            "*Set Maximum Purchase Price*\n\n"
-            "Send me the maximum price you want to spend per item (in USD).\n\n"
-            "Examples:\n"
-            "• `5` = $5.00\n"
-            "• `10.50` = $10.50\n"
-            "• `25` = $25.00\n\n"
-            "*Send your max price now:*",
-            parse_mode='Markdown'
-        )
+        text = """💰 *Set Maximum Purchase Price*
+
+Send me the maximum price you want to spend per item (in USD).
+
+**Examples:**
+• `5` = $5.00
+• `10.50` = $10.50
+• `25` = $25.00
+
+*Send your max price now:*"""
+        
+        keyboard = [[InlineKeyboardButton("🔙 Back to Settings", callback_data="settings")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     
     async def monitor_user_skins(self, user_id: int):
         """Main monitoring loop for a specific user"""
